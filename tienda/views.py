@@ -1,7 +1,8 @@
 import datetime
 import random
 
-from django.db.models import Sum
+from django.db.models import Sum, Count, Avg
+from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
@@ -13,16 +14,29 @@ from .forms import AlquilerCreateForm, MarcarPagadoForm, SimularVentasForm
 from .models import Alquiler, Categoria, Cliente, Pelicula
 
 
+#  DASHBOARD
 def index(request: HttpRequest) -> HttpResponse:
     total_peliculas = Pelicula.objects.count()
     total_clientes = Cliente.objects.count()
-    alquileres_pendientes = Alquiler.objects.filter(pagado=False).count()
+
+    #  cambiado: ahora usamos estado
+    alquileres_pendientes = Alquiler.objects.filter(estado='pendiente').count()
+
     ingresos = (
-        Alquiler.objects.filter(pagado=True)
+        Alquiler.objects.filter(estado='pagado')
         .aggregate(total=Sum("precio"))
         .get("total")
         or 0
     )
+
+    #  Bloque B extra
+    top_peliculas = Pelicula.objects.annotate(
+        total_alquileres=Count('alquileres')
+    ).order_by('-total_alquileres')[:5]
+
+    ticket_promedio = Alquiler.objects.filter(
+        estado='pagado'
+    ).aggregate(promedio=Avg('precio'))["promedio"]
 
     return render(
         request,
@@ -32,9 +46,15 @@ def index(request: HttpRequest) -> HttpResponse:
             "total_clientes": total_clientes,
             "alquileres_pendientes": alquileres_pendientes,
             "ingresos": ingresos,
+            "top_peliculas": top_peliculas,
+            "ticket_promedio": ticket_promedio,
         },
     )
 
+
+# =========================
+# CATEGORÍA
+# =========================
 
 class CategoriaListView(ListView):
     model = Categoria
@@ -44,7 +64,6 @@ class CategoriaListView(ListView):
 
 class CategoriaCreateView(CreateView):
     model = Categoria
-    form_class = None  # se usa el form del modelo con campos del template
     fields = ["nombre", "descripcion"]
     template_name = "tienda/categoria_form.html"
     success_url = reverse_lazy("categoria_list")
@@ -52,7 +71,6 @@ class CategoriaCreateView(CreateView):
 
 class CategoriaUpdateView(UpdateView):
     model = Categoria
-    form_class = None
     fields = ["nombre", "descripcion"]
     template_name = "tienda/categoria_form.html"
     success_url = reverse_lazy("categoria_list")
@@ -64,6 +82,10 @@ class CategoriaDeleteView(DeleteView):
     success_url = reverse_lazy("categoria_list")
 
 
+# =========================
+# CLIENTE
+# =========================
+
 class ClienteListView(ListView):
     model = Cliente
     template_name = "tienda/cliente_list.html"
@@ -72,40 +94,48 @@ class ClienteListView(ListView):
 
 class ClienteCreateView(CreateView):
     model = Cliente
-    fields = ["nombre", "email", "telefono"]
+    fields = ["nombre", "email", "telefono", "dni"]  #  agregado dni
     template_name = "tienda/cliente_form.html"
     success_url = reverse_lazy("cliente_list")
 
 
 class ClienteUpdateView(UpdateView):
     model = Cliente
-    fields = ["nombre", "email", "telefono"]
+    fields = ["nombre", "email", "telefono", "dni"]  #  agregado dni
     template_name = "tienda/cliente_form.html"
     success_url = reverse_lazy("cliente_list")
 
 
-class ClienteDeleteView(DeleteView):
-    model = Cliente
-    template_name = "tienda/cliente_confirm_delete.html"
-    success_url = reverse_lazy("cliente_list")
-
+# =========================
+# PELÍCULA
+# =========================
 
 class PeliculaListView(ListView):
     model = Pelicula
     template_name = "tienda/pelicula_list.html"
     context_object_name = "peliculas"
 
+    #  optimización
+    def get_queryset(self):
+        return Pelicula.objects.select_related("categoria")
+
 
 class PeliculaCreateView(CreateView):
     model = Pelicula
-    fields = ["titulo", "anio", "categoria", "precio_alquiler"]
+    fields = [
+        "titulo", "anio", "categoria", "precio_alquiler",
+        "stock", "duracion_minutos", "director", "pais_origen"
+    ]
     template_name = "tienda/pelicula_form.html"
     success_url = reverse_lazy("pelicula_list")
 
 
 class PeliculaUpdateView(UpdateView):
     model = Pelicula
-    fields = ["titulo", "anio", "categoria", "precio_alquiler"]
+    fields = [
+        "titulo", "anio", "categoria", "precio_alquiler",
+        "stock", "duracion_minutos", "director", "pais_origen"
+    ]
     template_name = "tienda/pelicula_form.html"
     success_url = reverse_lazy("pelicula_list")
 
@@ -116,6 +146,20 @@ class PeliculaDeleteView(DeleteView):
     success_url = reverse_lazy("pelicula_list")
 
 
+# =========================
+# ALQUILER
+# =========================
+
+class AlquilerListView(ListView):
+    model = Alquiler
+    template_name = "tienda/alquiler_list.html"
+    context_object_name = "alquileres"
+
+    #  optimización (Bloque B)
+    def get_queryset(self):
+        return Alquiler.objects.select_related("cliente", "pelicula")
+
+
 class AlquilerCreateView(CreateView):
     model = Alquiler
     form_class = AlquilerCreateForm
@@ -123,106 +167,52 @@ class AlquilerCreateView(CreateView):
     success_url = reverse_lazy("alquiler_list")
 
 
-class AlquilerListView(ListView):
-    model = Alquiler
-    template_name = "tienda/alquiler_list.html"
-    context_object_name = "alquileres"
-    paginate_by = 20
-
-    def get_queryset(self):
-        qs = super().get_queryset().select_related("cliente", "pelicula", "pelicula__categoria")
-        pagado = self.request.GET.get("pagado")
-        if pagado == "1":
-            qs = qs.filter(pagado=True)
-        elif pagado == "0":
-            qs = qs.filter(pagado=False)
-        return qs
-
-
 class MarcarPagadoView(View):
-    template_name = "tienda/marcar_pagado.html"
-
-    def get(self, request: HttpRequest, pk: int) -> HttpResponse:
+    def post(self, request, pk):
         alquiler = get_object_or_404(Alquiler, pk=pk)
-        form = MarcarPagadoForm()
-        return render(request, self.template_name, {"alquiler": alquiler, "form": form})
-
-    def post(self, request: HttpRequest, pk: int) -> HttpResponse:
-        alquiler = get_object_or_404(Alquiler, pk=pk)
-        form = MarcarPagadoForm(request.POST)
-        if form.is_valid():
-            alquiler.marcar_pagado(fecha_devolucion=form.cleaned_data.get("fecha_devolucion"))
-            return redirect("alquiler_list")
-        return render(request, self.template_name, {"alquiler": alquiler, "form": form})
+        alquiler.estado = 'pagado'
+        alquiler.fecha_pago = timezone.now()
+        alquiler.save()
+        return redirect("alquiler_list")
 
 
-class VentasListView(ListView):
-    model = Alquiler
-    template_name = "tienda/ventas_list.html"
-    context_object_name = "ventas"
+# =========================
+# CONSULTAS AVANZADAS (BLOQUE B)
+# =========================
 
-    def get_queryset(self):
-        return (
-            Alquiler.objects.filter(pagado=True)
-            .select_related("cliente", "pelicula", "pelicula__categoria")
-            .order_by("-fecha_alquiler")
-        )
+def reportes(request):
+    hoy = timezone.localdate()
 
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        ctx["total_ingresos"] = self.get_queryset().aggregate(total=Sum("precio")).get("total") or 0
-        return ctx
+    #  vencidos
+    vencidos = Alquiler.objects.filter(
+        estado='pendiente',
+        fecha_devolucion__lt=hoy
+    )
 
+    #  ingresos por categoría
+    ingresos_categoria = Alquiler.objects.values(
+        'pelicula__categoria__nombre'
+    ).annotate(
+        total=Sum('precio')
+    )
 
-def simular_ventas(request: HttpRequest) -> HttpResponse:
-    if request.method == "POST":
-        form = SimularVentasForm(request.POST)
-        if form.is_valid():
-            numero = form.cleaned_data["numero_ventas"]
-            desde = form.cleaned_data["desde"]
-            hasta = form.cleaned_data["hasta"]
+    #  ranking mensual
+    ranking = Alquiler.objects.filter(
+        estado='pagado'
+    ).annotate(
+        mes=TruncMonth('fecha_alquiler')
+    ).values(
+        'mes', 'cliente__nombre'
+    ).annotate(
+        total=Sum('precio')
+    ).order_by('-mes', '-total')
 
-            clientes = list(Cliente.objects.all())
-            peliculas = list(Pelicula.objects.all())
-
-            if not clientes or not peliculas:
-                return render(
-                    request,
-                    "tienda/simular_ventas.html",
-                    {"form": form, "error": "Necesitas al menos 1 cliente y 1 película para simular."},
-                )
-
-            # Generamos fechas aleatorias en el rango.
-            alquileres_creados = 0
-            delta_dias = (hasta - desde).days if hasta >= desde else 0
-
-            for _ in range(numero):
-                cliente = random.choice(clientes)
-                pelicula = random.choice(peliculas)
-
-                offset = random.randint(0, max(delta_dias, 0))
-                fecha_alquiler = desde + datetime.timedelta(days=offset)
-
-                # En esta versión simple, una "venta" es un alquiler marcado como pagado.
-                fecha_devolucion = fecha_alquiler + datetime.timedelta(days=random.randint(0, 7))
-                Alquiler.objects.create(
-                    cliente=cliente,
-                    pelicula=pelicula,
-                    fecha_alquiler=fecha_alquiler,
-                    pagado=True,
-                    fecha_devolucion=fecha_devolucion,
-                )
-                alquileres_creados += 1
-
-            return redirect("ventas_list")
-    else:
-        form = SimularVentasForm(
-            initial={
-                "numero_ventas": 10,
-                "desde": timezone.localdate(),
-                "hasta": timezone.localdate(),
-            }
-        )
-
-    return render(request, "tienda/simular_ventas.html", {"form": form})
-
+    return render(
+        request,
+        "tienda/reportes.html",
+        {
+            "vencidos": vencidos,
+            "ingresos_categoria": ingresos_categoria,
+            "ranking": ranking,
+        }
+    )
