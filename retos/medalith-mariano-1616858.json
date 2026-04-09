@@ -1,0 +1,70 @@
+{
+  "alumno": "Medalith Mariano",
+  "codigo": "1616858",
+  "token_entrega": "008A7D938CBE",
+  "generado_en_utc": "2026-04-09T15:02:29.314280+00:00",
+  "reglas_entrega": {
+    "rama_git_obligatoria": "alumno/medalith-mariano-008a",
+    "nombre_archivo_reflexion": "REFLEXION_008A7D938CBE.md",
+    "incluir_token_en_readme": true,
+    "incluir_token_en_commit_final": true
+  },
+  "parametros_unicos": {
+    "stock_minimo_pelicula": 1,
+    "mora_por_dia_soles": 1,
+    "limite_alquileres_pendientes": 3,
+    "dias_maximo_retraso": 10,
+    "prefijo_slug_obligatorio": "medali-40"
+  },
+  "retos_asignados": [
+    {
+      "id": 2,
+      "titulo": "Reto Django #2"
+    },
+    {
+      "id": 7,
+      "titulo": "Reto Django #7"
+    },
+    {
+      "id": 16,
+      "titulo": "Reto Django #16"
+    },
+    {
+      "id": 25,
+      "titulo": "Reto Django #25"
+    },
+    {
+      "id": 37,
+      "titulo": "Reto Django #37"
+    },
+    {
+      "id": 46,
+      "titulo": "Reto Django #46"
+    },
+    {
+      "id": 50,
+      "titulo": "Reto Django #50"
+    },
+    {
+      "id": 51,
+      "titulo": "Reto Django #51"
+    },
+    {
+      "id": 52,
+      "titulo": "Reto Django #52"
+    },
+    {
+      "id": 58,
+      "titulo": "Reto Django #58"
+    },
+    {
+      "id": 66,
+      "titulo": "Reto Django #66"
+    },
+    {
+      "id": 100,
+      "titulo": "Reto Django #100"
+    }
+  ],
+  "instruccion_docente": "Pide al alumno que implemente solo estos retos. Si otro repo tiene token o parámetros distintos, se considera copia."
+}
